@@ -1,4 +1,9 @@
+
+# Mac OS Files
 .DS_Store
+
+# Ide Files
+.idea/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
