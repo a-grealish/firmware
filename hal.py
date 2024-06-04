@@ -1,15 +1,19 @@
-from gpiozero import PWMOutputDevice, DigitalOutputDevice, InputDevice, SPIDevice
+import logging
+from statistics import fmean
+from time import sleep
 
+from gpiozero import PWMOutputDevice, DigitalOutputDevice, SPIDevice, MCP3001
+
+logger = logging.getLogger(__name__)
 
 class ChargerHAL:
     def __init__(self):
         self.control_pilot = PWMOutputDevice(pin="GPIO12", frequency=1000)
 
-        # Todo: Check this pull-up
-        self.control_pilot_read = InputDevice(pin="GPIO3", pull_up=True)
-
         # Todo: Catch the warning for disabled SPI device
         self.energy_monitor = SPIDevice(port=0, device=0)
+
+        self.cp_adc = MCP3001(port=0, device=1, max_voltage=5.0)
 
         self.relay = DigitalOutputDevice(
             pin="GPIO5",
@@ -35,14 +39,44 @@ class ChargerHAL:
         self._set_cp_pwm(pwm_value)
 
     def read_cp_voltage(self) -> float:
-        return self.control_pilot_read.value * 3.3
+        # Voltage adjusts for the max_voltage reference of 5V
+        # Multiply by the power board scaling factor to get the true top
+        # value of the CP Pin. This was measured at 6.3x
+        return self.cp_adc.voltage * 6.3
 
-    def read_voltage(self) -> float:
+    def cp_top_voltage(self):
+        voltages = []
+
+        # This is designed to sample over a full PWM cycle at 1 khz, but I've assumed
+        # that reading the ADC and appending to a list has no impact of the time. This
+        # is probably true, but we could check.
+        for i in range(1000):
+            v = self.read_cp_voltage()
+            voltages.append(v)
+            sleep(0.00001)
+
+        cp_voltage_max = max(voltages)
+        cp_voltage_min = min(voltages)
+
+        # If we're in a PWM mode, only average the "high" voltages
+        if cp_voltage_min > 3:
+            logger.debug("A PWM output was detected, averaging just the high values")
+            mid_point = (cp_voltage_max + cp_voltage_min) / 2
+            cp_voltage_top = fmean([v for v in voltages if v > mid_point])
+        else:
+            cp_voltage_top = fmean(voltages)
+
+        logger.info(f"CP Top Voltage Read as: {cp_voltage_top}")
+        logger.debug(voltages)
+
+        return cp_voltage_top
+
+    def read_ac_voltage(self) -> float:
         # Implement the logic to read voltage from the SPI device
         # Return the voltage value
         pass
 
-    def read_current(self) -> float:
+    def read_ac_current(self) -> float:
         # Implement the logic to read current from the SPI device
         # Return the current value
         pass
